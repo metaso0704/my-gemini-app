@@ -126,4 +126,3 @@ if prompt := st.chat_input(f"『{current_project}』について会話を入力.
         f.flush()
 
     st.toast(f"✅ 『{current_project}』のファイルに100%追記保存されました", icon="💾")
-app.py を表示しています。
