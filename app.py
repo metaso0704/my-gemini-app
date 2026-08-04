@@ -40,23 +40,25 @@ api_key = api_key.strip()
 # API設定
 genai.configure(api_key=api_key)
 
-# 利用可能なモデルの自動検出
-available_models = []
+# 安定して無料枠が開放されているモデルリスト（1.5系を最優先）
+stable_models = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash-exp"]
+
+# 利用可能なモデルの自動検出補言
 try:
+    detected_models = []
     for m in genai.list_models():
         if "generateContent" in m.supported_generation_methods:
             model_id = m.name.replace("models/", "")
-            available_models.append(model_id)
+            if model_id not in stable_models and "2.5" not in model_id:
+                detected_models.append(model_id)
+    all_models = stable_models + detected_models
 except Exception:
-    pass
+    all_models = stable_models
 
-if not available_models:
-    available_models = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-1.5-flash-latest"]
-
-# モデル選択ドロップダウン（APIが実際に使えるモデルを自動提示）
+# モデル選択ドロップダウン（gemini-1.5-flash を確実に最優先）
 selected_model_name = st.sidebar.selectbox(
     "🤖 使用するGeminiモデルを選択:",
-    available_models,
+    all_models,
     index=0
 )
 
@@ -155,4 +157,4 @@ if prompt := st.chat_input(f"『{current_project}』について会話を入力.
 
         except Exception as e:
             st.error(f"⚠️ Gemini APIエラーが発生しました: {e}")
-            st.info("※入力されたAPIキーが [Google AI Studio](https://aistudio.google.com/) で取得した正しいキーか確認してください。")
+            st.info("※左側の「使用するGeminiモデルを選択」で『gemini-1.5-flash』を選択して試してみてください。")
