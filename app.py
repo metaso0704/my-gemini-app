@@ -99,12 +99,12 @@ if prompt := st.chat_input(f"『{current_project}』について会話を入力.
         contents.append({"role": role, "parts": [{"text": msg["content"]}]})
     contents.append({"role": "user", "parts": [{"text": prompt}]})
 
-    # Gemini応答処理（エラーをキャッチしてクラッシュを防ぐ）
+    # Gemini応答処理（最新のgemini-2.0-flashモデルを指定）
     with st.chat_message("assistant"):
         try:
             client = genai.Client(api_key=api_key)
             response = client.models.generate_content(
-                model="gemini-1.5-flash",
+                model="gemini-2.0-flash",
                 contents=contents,
                 config=types.GenerateContentConfig(
                     system_instruction=(
