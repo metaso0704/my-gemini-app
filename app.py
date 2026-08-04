@@ -24,7 +24,7 @@ if not st.session_state.authenticated:
             st.error("パスワードが正しくありません。")
     st.stop()
 
-# --- サイドバー：作品・チャット切り替え機能 ---
+# --- サイドバー：作品・チャット・モデル管理 ---
 st.sidebar.title("📚 作品・チャット管理")
 
 # APIキー設定
@@ -37,6 +37,13 @@ if not api_key:
 
 # 空白文字を除去
 api_key = api_key.strip()
+
+# 無料枠が確実に利用可能なモデルの選択機能
+selected_model = st.sidebar.selectbox(
+    "🤖 使用するGeminiモデルを選択:",
+    ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash-exp"],
+    index=0
+)
 
 # プロジェクト（作品）リストの管理
 if "projects" not in st.session_state:
@@ -99,12 +106,12 @@ if prompt := st.chat_input(f"『{current_project}』について会話を入力.
         contents.append({"role": role, "parts": [{"text": msg["content"]}]})
     contents.append({"role": "user", "parts": [{"text": prompt}]})
 
-    # Gemini応答処理（最新のgemini-2.0-flashモデルを指定）
+    # Gemini応答処理
     with st.chat_message("assistant"):
         try:
             client = genai.Client(api_key=api_key)
             response = client.models.generate_content(
-                model="gemini-2.0-flash",
+                model=selected_model,
                 contents=contents,
                 config=types.GenerateContentConfig(
                     system_instruction=(
@@ -124,7 +131,7 @@ if prompt := st.chat_input(f"『{current_project}』について会話を入力.
             now_time = datetime.now().strftime("%H:%M:%S")
             with open(SAVE_FILE, "a", encoding="utf-8") as f:
                 f.write(f"### あなた ({now_time})\n{prompt}\n\n")
-                f.write(f"### Gemini\n{response_text}\n\n")
+                f.write(f"### Gemini ({selected_model})\n{response_text}\n\n")
                 f.write("-" * 40 + "\n\n")
                 f.flush()
 
@@ -132,4 +139,4 @@ if prompt := st.chat_input(f"『{current_project}』について会話を入力.
 
         except Exception as e:
             st.error(f"⚠️ Gemini APIエラーが発生しました: {e}")
-            st.info("左側のサイドバーに入力したGemini APIキーが正しいか確認してください。")
+            st.info("左側のサイドバーに入力したGemini APIキーや選択モデルを確認してください。")
