@@ -23,7 +23,7 @@ if not st.session_state.authenticated:
             st.error("パスワードが正しくありません。")
     st.stop()
 
-# --- サイドバー：作品・チャット・モデル管理 ---
+# --- サイドバー管理 ---
 st.sidebar.title("📚 作品・チャット管理")
 
 # APIキー設定
@@ -36,13 +36,6 @@ if not api_key:
 
 # 空白文字を除去
 api_key = api_key.strip()
-
-# モデル選択
-selected_model_name = st.sidebar.selectbox(
-    "🤖 使用するGeminiモデルを選択:",
-    ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash"],
-    index=0
-)
 
 # プロジェクト（作品）リストの管理
 if "projects" not in st.session_state:
@@ -98,7 +91,7 @@ if prompt := st.chat_input(f"『{current_project}』について会話を入力.
     # ユーザー表示
     st.chat_message("user").markdown(prompt)
 
-    # Gemini応答処理（limit: 0 エラーを全自動で回避するマルチモデル試行機能付き）
+    # Gemini応答処理
     with st.chat_message("assistant"):
         try:
             # 会話履歴の構築
@@ -113,16 +106,41 @@ if prompt := st.chat_input(f"『{current_project}』について会話を入力.
                 "ユーザーと一緒に物語のプロット作成、キャラクター設定、本文の執筆・推敲を行います。"
             )
 
-            # limit: 0 やクォータエラーを自動回避するための試行モデル順序
-            models_to_try = [selected_model_name, "gemini-1.5-flash", "gemini-1.5-pro"]
-            models_to_try = list(dict.fromkeys(models_to_try))
+            # APIキーで利用可能なモデル一覧を動的に全件チェックして最初に成功するモデルを自動使用
+            models_to_test = [
+                "models/gemini-1.5-flash",
+                "models/gemini-2.0-flash",
+                "models/gemini-1.5-pro",
+                "models/gemini-2.0-flash-lite"
+            ]
+
+            # 実際のAPIから使用可能モデルを取得して先頭に追加
+            try:
+                list_url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
+                r_list = requests.get(list_url, timeout=5)
+                d_list = r_list.json()
+                if "models" in d_list:
+                    fetched_models = [
+                        m["name"] for m in d_list["models"]
+                        if "generateContent" in m.get("supportedGenerationMethods", [])
+                    ]
+                    if fetched_models:
+                        models_to_test = fetched_models + models_to_test
+            except Exception:
+                pass
+
+            # 重複削除
+            models_to_test = list(dict.fromkeys(models_to_test))
 
             response_text = None
-            last_error_msg = None
-            used_model = selected_model_name
+            used_model_name = ""
+            last_err = ""
 
-            for m_name in models_to_try:
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/{m_name}:generateContent?key={api_key}"
+            for m_path in models_to_test:
+                if not m_path.startswith("models/"):
+                    m_path = f"models/{m_path}"
+
+                url = f"https://generativelanguage.googleapis.com/v1beta/{m_path}:generateContent?key={api_key}"
                 headers = {"Content-Type": "application/json"}
                 payload = {
                     "contents": contents,
@@ -131,15 +149,15 @@ if prompt := st.chat_input(f"『{current_project}』について会話を入力.
                     }
                 }
 
-                res = requests.post(url, headers=headers, json=payload, timeout=60)
+                res = requests.post(url, headers=headers, json=payload, timeout=30)
                 res_json = res.json()
 
                 if "candidates" in res_json and len(res_json["candidates"]) > 0:
                     response_text = res_json["candidates"][0]["content"]["parts"][0]["text"]
-                    used_model = m_name
+                    used_model_name = m_path
                     break
                 else:
-                    last_error_msg = res_json.get("error", {}).get("message", str(res_json))
+                    last_err = res_json.get("error", {}).get("message", str(res_json))
 
             if response_text:
                 st.markdown(response_text)
@@ -152,13 +170,13 @@ if prompt := st.chat_input(f"『{current_project}』について会話を入力.
                 now_time = datetime.now().strftime("%H:%M:%S")
                 with open(SAVE_FILE, "a", encoding="utf-8") as f:
                     f.write(f"### あなた ({now_time})\n{prompt}\n\n")
-                    f.write(f"### Gemini ({used_model})\n{response_text}\n\n")
+                    f.write(f"### Gemini ({used_model_name})\n{response_text}\n\n")
                     f.write("-" * 40 + "\n\n")
                     f.flush()
 
                 st.toast(f"✅ 『{current_project}』のファイルに100%追記保存されました", icon="💾")
             else:
-                st.error(f"⚠️ Gemini APIエラー: {last_error_msg}")
+                st.error(f"⚠️ Gemini APIエラー: {last_err}")
 
         except Exception as e:
             st.error(f"⚠️ 通信エラーが発生しました: {e}")
