@@ -2,6 +2,7 @@ import os
 import streamlit as st
 from datetime import datetime
 from google import genai
+from google.genai import types
 
 # ページ基本設定
 st.set_page_config(page_title="Gemini 小説執筆＆複数作品自動保存アプリ", page_icon="📝", layout="wide")
@@ -33,6 +34,9 @@ if not api_key:
     if not api_key:
         st.info("左側のサイドバーにGemini APIキーを入力してください。")
         st.stop()
+
+# 空白文字を除去
+api_key = api_key.strip()
 
 # プロジェクト（作品）リストの管理
 if "projects" not in st.session_state:
@@ -95,31 +99,28 @@ if prompt := st.chat_input(f"『{current_project}』について会話を入力.
         contents.append({"role": role, "parts": [{"text": msg["content"]}]})
     contents.append({"role": "user", "parts": [{"text": prompt}]})
 
-    # Gemini応答処理（接続切り離しエラーを100%防ぐ堅牢な構成）
+    # Gemini応答処理（エラーをキャッチしてクラッシュを防ぐ）
     with st.chat_message("assistant"):
-        client = genai.Client(api_key=api_key)
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=contents,
-            config={
-                "system_instruction": (
-                    f"あなたは作品『{current_project}』執筆のパートナーAIです。"
-                    "ユーザーと一緒に物語のプロット作成、キャラクター設定、本文の執筆・推敲を行います。"
+        try:
+            client = genai.Client(api_key=api_key)
+            # 推奨される標準モデル名 (gemini-1.5-flash) を指定
+            response = client.models.generate_content(
+                model="gemini-1.5-flash",
+                contents=contents,
+                config=types.GenerateContentConfig(
+                    system_instruction=(
+                        f"あなたは作品『{current_project}』執筆のパートナーAIです。"
+                        "ユーザーと一緒に物語のプロット作成、キャラクター設定、本文の執筆・推敲を行います。"
+                    )
                 )
-            }
-        )
-        response_text = response.text
-        st.markdown(response_text)
+            )
+            response_text = response.text
+            st.markdown(response_text)
 
-    # 履歴更新
-    st.session_state[messages_key].append({"role": "user", "content": prompt})
-    st.session_state[messages_key].append({"role": "assistant", "content": response_text})
+            # 履歴更新
+            st.session_state[messages_key].append({"role": "user", "content": prompt})
+            st.session_state[messages_key].append({"role": "assistant", "content": response_text})
 
-    # 【絶対自動保存の核】選択されている作品専用のファイルに100%追記保存
-    with open(SAVE_FILE, "a", encoding="utf-8") as f:
-        f.write(f"### あなた ({datetime.now().strftime('%H:%M:%S')})\n{prompt}\n\n")
-        f.write(f"### Gemini\n{response_text}\n\n")
-        f.write("-" * 40 + "\n\n")
-        f.flush()
-
-    st.toast(f"✅ 『{current_project}』のファイルに100%追記保存されました", icon="💾")
+            # 【絶対自動保存】選択されている作品専用のファイルに100%追記保存
+            with open(SAVE_FILE, "a", encoding="utf-8") as f:
+                f.write(f"### あなた ({datetime.now
