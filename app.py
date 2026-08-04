@@ -103,7 +103,6 @@ if prompt := st.chat_input(f"『{current_project}』について会話を入力.
     with st.chat_message("assistant"):
         try:
             client = genai.Client(api_key=api_key)
-            # 推奨される標準モデル名 (gemini-1.5-flash) を指定
             response = client.models.generate_content(
                 model="gemini-1.5-flash",
                 contents=contents,
@@ -122,5 +121,15 @@ if prompt := st.chat_input(f"『{current_project}』について会話を入力.
             st.session_state[messages_key].append({"role": "assistant", "content": response_text})
 
             # 【絶対自動保存】選択されている作品専用のファイルに100%追記保存
+            now_time = datetime.now().strftime("%H:%M:%S")
             with open(SAVE_FILE, "a", encoding="utf-8") as f:
-                f.write(f"### あなた ({datetime.now
+                f.write(f"### あなた ({now_time})\n{prompt}\n\n")
+                f.write(f"### Gemini\n{response_text}\n\n")
+                f.write("-" * 40 + "\n\n")
+                f.flush()
+
+            st.toast(f"✅ 『{current_project}』のファイルに100%追記保存されました", icon="💾")
+
+        except Exception as e:
+            st.error(f"⚠️ Gemini APIエラーが発生しました: {e}")
+            st.info("左側のサイドバーに入力したGemini APIキーが正しいか確認してください。")
