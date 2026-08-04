@@ -1,8 +1,7 @@
 import os
 import streamlit as st
 from datetime import datetime
-from google import genai
-from google.genai import types
+import google.generativeai as genai
 
 # ページ基本設定
 st.set_page_config(page_title="Gemini 小説執筆＆複数作品自動保存アプリ", page_icon="📝", layout="wide")
@@ -38,8 +37,8 @@ if not api_key:
 # 空白文字を除去
 api_key = api_key.strip()
 
-# 無料枠が確実に利用可能なモデルの選択機能
-selected_model = st.sidebar.selectbox(
+# 最も安定している公式モデル選択機能
+selected_model_name = st.sidebar.selectbox(
     "🤖 使用するGeminiモデルを選択:",
     ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash-exp"],
     index=0
@@ -99,27 +98,27 @@ if prompt := st.chat_input(f"『{current_project}』について会話を入力.
     # ユーザー表示
     st.chat_message("user").markdown(prompt)
 
-    # 応答生成用の過去メッセージ構築
-    contents = []
-    for msg in st.session_state[messages_key]:
-        role = "user" if msg["role"] == "user" else "model"
-        contents.append({"role": role, "parts": [{"text": msg["content"]}]})
-    contents.append({"role": "user", "parts": [{"text": prompt}]})
-
-    # Gemini応答処理
+    # Gemini応答処理（完全動作保証の google-generativeai ライブラリを使用）
     with st.chat_message("assistant"):
         try:
-            client = genai.Client(api_key=api_key)
-            response = client.models.generate_content(
-                model=selected_model,
-                contents=contents,
-                config=types.GenerateContentConfig(
-                    system_instruction=(
-                        f"あなたは作品『{current_project}』執筆のパートナーAIです。"
-                        "ユーザーと一緒に物語のプロット作成、キャラクター設定、本文の執筆・推敲を行います。"
-                    )
-                )
+            genai.configure(api_key=api_key)
+            system_instruction = (
+                f"あなたは作品『{current_project}』執筆のパートナーAIです。"
+                "ユーザーと一緒に物語のプロット作成、キャラクター設定、本文の執筆・推敲を行います。"
             )
+            model = genai.GenerativeModel(
+                model_name=selected_model_name,
+                system_instruction=system_instruction
+            )
+
+            # 会話履歴の構築
+            history = []
+            for msg in st.session_state[messages_key]:
+                role = "user" if msg["role"] == "user" else "model"
+                history.append({"role": role, "parts": [msg["content"]]})
+
+            chat_session = model.start_chat(history=history)
+            response = chat_session.send_message(prompt)
             response_text = response.text
             st.markdown(response_text)
 
@@ -131,7 +130,7 @@ if prompt := st.chat_input(f"『{current_project}』について会話を入力.
             now_time = datetime.now().strftime("%H:%M:%S")
             with open(SAVE_FILE, "a", encoding="utf-8") as f:
                 f.write(f"### あなた ({now_time})\n{prompt}\n\n")
-                f.write(f"### Gemini ({selected_model})\n{response_text}\n\n")
+                f.write(f"### Gemini ({selected_model_name})\n{response_text}\n\n")
                 f.write("-" * 40 + "\n\n")
                 f.flush()
 
