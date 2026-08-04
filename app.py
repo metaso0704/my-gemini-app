@@ -34,9 +34,6 @@ if not api_key:
         st.info("左側のサイドバーにGemini APIキーを入力してください。")
         st.stop()
 
-# クライアント初期化
-client = genai.Client(api_key=api_key)
-
 # プロジェクト（作品）リストの管理
 if "projects" not in st.session_state:
     st.session_state.projects = ["メイン作品"]
@@ -54,20 +51,9 @@ current_project = st.sidebar.selectbox("📖 編集・会話する作品を選�
 
 # 作品ごとの保存ファイル名
 SAVE_FILE = f"novel_{current_project}.md"
-
-# 各プロジェクトごとのチャット履歴・セッション保持
-session_key = f"chat_{current_project}"
 messages_key = f"messages_{current_project}"
 
-if session_key not in st.session_state:
-    system_instruction = (
-        f"あなたは作品『{current_project}』執筆のパートナーAIです。"
-        "ユーザーと一緒に物語のプロット作成、キャラクター設定、本文の執筆・推敲を行います。"
-    )
-    st.session_state[session_key] = client.chats.create(
-        model="gemini-2.5-flash",
-        config={"system_instruction": system_instruction}
-    )
+if messages_key not in st.session_state:
     st.session_state[messages_key] = []
 
     # 初回ファイルヘッダー
@@ -101,14 +87,33 @@ for msg in st.session_state[messages_key]:
 if prompt := st.chat_input(f"『{current_project}』について会話を入力..."):
     # ユーザー表示
     st.chat_message("user").markdown(prompt)
-    st.session_state[messages_key].append({"role": "user", "content": prompt})
 
-    # Gemini応答処理
+    # 応答生成用の過去メッセージ構築
+    contents = []
+    for msg in st.session_state[messages_key]:
+        role = "user" if msg["role"] == "user" else "model"
+        contents.append({"role": role, "parts": [{"text": msg["content"]}]})
+    contents.append({"role": "user", "parts": [{"text": prompt}]})
+
+    # Gemini応答処理（接続切り離しエラーを100%防ぐ堅牢な構成）
     with st.chat_message("assistant"):
-        response = st.session_state[session_key].send_message(prompt)
+        client = genai.Client(api_key=api_key)
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=contents,
+            config={
+                "system_instruction": (
+                    f"あなたは作品『{current_project}』執筆のパートナーAIです。"
+                    "ユーザーと一緒に物語のプロット作成、キャラクター設定、本文の執筆・推敲を行います。"
+                )
+            }
+        )
         response_text = response.text
         st.markdown(response_text)
-        st.session_state[messages_key].append({"role": "assistant", "content": response_text})
+
+    # 履歴更新
+    st.session_state[messages_key].append({"role": "user", "content": prompt})
+    st.session_state[messages_key].append({"role": "assistant", "content": response_text})
 
     # 【絶対自動保存の核】選択されている作品専用のファイルに100%追記保存
     with open(SAVE_FILE, "a", encoding="utf-8") as f:
