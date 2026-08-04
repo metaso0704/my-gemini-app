@@ -37,10 +37,26 @@ if not api_key:
 # 空白文字を除去
 api_key = api_key.strip()
 
-# モデル選択
+# API設定
+genai.configure(api_key=api_key)
+
+# 利用可能なモデルの自動検出
+available_models = []
+try:
+    for m in genai.list_models():
+        if "generateContent" in m.supported_generation_methods:
+            model_id = m.name.replace("models/", "")
+            available_models.append(model_id)
+except Exception:
+    pass
+
+if not available_models:
+    available_models = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-1.5-flash-latest"]
+
+# モデル選択ドロップダウン（APIが実際に使えるモデルを自動提示）
 selected_model_name = st.sidebar.selectbox(
-    "🤖 優先使用モデルを選択:",
-    ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash-exp"],
+    "🤖 使用するGeminiモデルを選択:",
+    available_models,
     index=0
 )
 
@@ -98,10 +114,9 @@ if prompt := st.chat_input(f"『{current_project}』について会話を入力.
     # ユーザー表示
     st.chat_message("user").markdown(prompt)
 
-    # Gemini応答処理（404エラーを100%回避する自動モデルフォールバック機能付き）
+    # Gemini応答処理
     with st.chat_message("assistant"):
         try:
-            genai.configure(api_key=api_key)
             system_instruction = (
                 f"あなたは作品『{current_project}』執筆のパートナーAIです。"
                 "ユーザーと一緒に物語のプロット作成、キャラクター設定、本文の執筆・推敲を行います。"
@@ -113,40 +128,14 @@ if prompt := st.chat_input(f"『{current_project}』について会話を入力.
                 role = "user" if msg["role"] == "user" else "model"
                 history.append({"role": role, "parts": [msg["content"]]})
 
-            # モデルの自動フォールバック試行
-            candidate_models = [
-                selected_model_name,
-                f"models/{selected_model_name}",
-                "gemini-1.5-flash",
-                "models/gemini-1.5-flash",
-                "gemini-1.5-pro",
-                "models/gemini-1.5-pro",
-                "gemini-2.0-flash-exp"
-            ]
-
-            response_text = None
-            last_error = None
-
-            for m_name in candidate_models:
-                try:
-                    model = genai.GenerativeModel(
-                        model_name=m_name,
-                        system_instruction=system_instruction
-                    )
-                    chat_session = model.start_chat(history=history)
-                    response = chat_session.send_message(prompt)
-                    response_text = response.text
-                    if response_text:
-                        break
-                except Exception as ex:
-                    last_error = ex
-                    continue
-
-            if not response_text:
-                if last_error:
-                    raise last_error
-                else:
-                    raise RuntimeError("Geminiからの回答の生成に失敗しました。")
+            # モデルの初期化と生成
+            model = genai.GenerativeModel(
+                model_name=selected_model_name,
+                system_instruction=system_instruction
+            )
+            chat_session = model.start_chat(history=history)
+            response = chat_session.send_message(prompt)
+            response_text = response.text
 
             st.markdown(response_text)
 
@@ -158,7 +147,7 @@ if prompt := st.chat_input(f"『{current_project}』について会話を入力.
             now_time = datetime.now().strftime("%H:%M:%S")
             with open(SAVE_FILE, "a", encoding="utf-8") as f:
                 f.write(f"### あなた ({now_time})\n{prompt}\n\n")
-                f.write(f"### Gemini\n{response_text}\n\n")
+                f.write(f"### Gemini ({selected_model_name})\n{response_text}\n\n")
                 f.write("-" * 40 + "\n\n")
                 f.flush()
 
@@ -166,4 +155,4 @@ if prompt := st.chat_input(f"『{current_project}』について会話を入力.
 
         except Exception as e:
             st.error(f"⚠️ Gemini APIエラーが発生しました: {e}")
-            st.info("※Google AI Studio (https://aistudio.google.com/) で取得した正しいAPIキーが入力されているかご確認ください。")
+            st.info("※入力されたAPIキーが [Google AI Studio](https://aistudio.google.com/) で取得した正しいキーか確認してください。")
