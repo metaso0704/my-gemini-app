@@ -1,11 +1,3 @@
-
-app.py
-
-1
-/
-1
-ページ
-100%
 import os
 import streamlit as st
 from datetime import datetime
