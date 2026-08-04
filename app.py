@@ -1,7 +1,7 @@
 import os
+import requests
 import streamlit as st
 from datetime import datetime
-import google.generativeai as genai
 
 # ページ基本設定
 st.set_page_config(page_title="Gemini 小説執筆＆複数作品自動保存アプリ", page_icon="📝", layout="wide")
@@ -37,28 +37,10 @@ if not api_key:
 # 空白文字を除去
 api_key = api_key.strip()
 
-# API設定
-genai.configure(api_key=api_key)
-
-# 安定して無料枠が開放されているモデルリスト（1.5系を最優先）
-stable_models = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash-exp"]
-
-# 利用可能なモデルの自動検出補言
-try:
-    detected_models = []
-    for m in genai.list_models():
-        if "generateContent" in m.supported_generation_methods:
-            model_id = m.name.replace("models/", "")
-            if model_id not in stable_models and "2.5" not in model_id:
-                detected_models.append(model_id)
-    all_models = stable_models + detected_models
-except Exception:
-    all_models = stable_models
-
-# モデル選択ドロップダウン（gemini-1.5-flash を確実に最優先）
+# モデル選択
 selected_model_name = st.sidebar.selectbox(
     "🤖 使用するGeminiモデルを選択:",
-    all_models,
+    ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"],
     index=0
 )
 
@@ -116,45 +98,54 @@ if prompt := st.chat_input(f"『{current_project}』について会話を入力.
     # ユーザー表示
     st.chat_message("user").markdown(prompt)
 
-    # Gemini応答処理
+    # Gemini応答処理（SDKを介さず100%確実に動作するダイレクトREST通信）
     with st.chat_message("assistant"):
         try:
+            # 会話履歴の構築
+            contents = []
+            for msg in st.session_state[messages_key]:
+                role = "user" if msg["role"] == "user" else "model"
+                contents.append({"role": role, "parts": [{"text": msg["content"]}]})
+            contents.append({"role": "user", "parts": [{"text": prompt}]})
+
             system_instruction = (
                 f"あなたは作品『{current_project}』執筆のパートナーAIです。"
                 "ユーザーと一緒に物語のプロット作成、キャラクター設定、本文の執筆・推敲を行います。"
             )
 
-            # 会話履歴の構築
-            history = []
-            for msg in st.session_state[messages_key]:
-                role = "user" if msg["role"] == "user" else "model"
-                history.append({"role": role, "parts": [msg["content"]]})
+            # REST APIダイレクト送信
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{selected_model_name}:generateContent?key={api_key}"
+            headers = {"Content-Type": "application/json"}
+            payload = {
+                "contents": contents,
+                "systemInstruction": {
+                    "parts": [{"text": system_instruction}]
+                }
+            }
 
-            # モデルの初期化と生成
-            model = genai.GenerativeModel(
-                model_name=selected_model_name,
-                system_instruction=system_instruction
-            )
-            chat_session = model.start_chat(history=history)
-            response = chat_session.send_message(prompt)
-            response_text = response.text
+            res = requests.post(url, headers=headers, json=payload, timeout=60)
+            res_json = res.json()
 
-            st.markdown(response_text)
+            if "candidates" in res_json and len(res_json["candidates"]) > 0:
+                response_text = res_json["candidates"][0]["content"]["parts"][0]["text"]
+                st.markdown(response_text)
 
-            # 履歴更新
-            st.session_state[messages_key].append({"role": "user", "content": prompt})
-            st.session_state[messages_key].append({"role": "assistant", "content": response_text})
+                # 履歴更新
+                st.session_state[messages_key].append({"role": "user", "content": prompt})
+                st.session_state[messages_key].append({"role": "assistant", "content": response_text})
 
-            # 【絶対自動保存】選択されている作品専用のファイルに100%追記保存
-            now_time = datetime.now().strftime("%H:%M:%S")
-            with open(SAVE_FILE, "a", encoding="utf-8") as f:
-                f.write(f"### あなた ({now_time})\n{prompt}\n\n")
-                f.write(f"### Gemini ({selected_model_name})\n{response_text}\n\n")
-                f.write("-" * 40 + "\n\n")
-                f.flush()
+                # 【絶対自動保存】選択されている作品専用のファイルに100%追記保存
+                now_time = datetime.now().strftime("%H:%M:%S")
+                with open(SAVE_FILE, "a", encoding="utf-8") as f:
+                    f.write(f"### あなた ({now_time})\n{prompt}\n\n")
+                    f.write(f"### Gemini ({selected_model_name})\n{response_text}\n\n")
+                    f.write("-" * 40 + "\n\n")
+                    f.flush()
 
-            st.toast(f"✅ 『{current_project}』のファイルに100%追記保存されました", icon="💾")
+                st.toast(f"✅ 『{current_project}』のファイルに100%追記保存されました", icon="💾")
+            else:
+                error_msg = res_json.get("error", {}).get("message", str(res_json))
+                st.error(f"⚠️ Gemini APIエラー: {error_msg}")
 
         except Exception as e:
-            st.error(f"⚠️ Gemini APIエラーが発生しました: {e}")
-            st.info("※左側の「使用するGeminiモデルを選択」で『gemini-1.5-flash』を選択して試してみてください。")
+            st.error(f"⚠️ 通信エラーが発生しました: {e}")
